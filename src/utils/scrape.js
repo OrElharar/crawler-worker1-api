@@ -7,10 +7,13 @@ const getFullUrl = (url) => {
         return url;
     }
     else {
-        return `http:${url}`
+        return `http://${url}`
     }
 }
-
+const isLinkValid = (url) => {
+    const urlRegex = /^(?:http(s)?:\/\/)?[\w.-]+(?:\.[\w\.-]+)+[\w\-\._~:/?#[\]@!\$&'\(\)\*\+,;=.]+$/
+    return urlRegex.test(url)
+}
 const scrape = async (url) => {
     try {
         const urlResponse = await Axios.get(url);
@@ -19,20 +22,25 @@ const scrape = async (url) => {
         const links = [];
         $("a").each((i, el) => {
             const link = getFullUrl($(el).attr("href"));
-            links.push(link);
+            if (isLinkValid(link))
+                links.push(link);
         })
         // console.log({ title, url, links });
         const page = { title, url, links };
         return JSON.stringify(page)
     }
     catch (err) {
-        return {
+        throw {
             status: 500,
             message: err.message
         }
     }
 }
 
-
+// scrape("https://www.instagram.com/or.elharar/").then((page) => {
+//     console.log({ page });
+// }).catch((err) => {
+//     console.log({ err });
+// })
 module.exports = scrape
 

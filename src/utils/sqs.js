@@ -31,19 +31,19 @@ const QueueUrl = "https://sqs.eu-west-1.amazonaws.com/000447063003/crawler-queue
 //     }
 // }
 
-const sendMessageToQueue = async (req, res, next) => {
-    const QueueUrl = req.body.queueUrl;
-    const MessageBody = JSON.stringify(req.body);
+const sendMessageToQueue = async (messageBody) => {
+    // const QueueUrl = req.body.queueUrl;
+    const MessageBody = JSON.stringify(messageBody);
+
     try {
-        const { MessageId } = await sqs.sendMessage({
+        await sqs.sendMessage({
             QueueUrl,
-            MessageGroupId: crawlerId,
+            // MessageGroupId: messageBody.crawlerId.toString(), ---FifoQueue
             MessageBody
         }).promise();
-        req.messageId = MessageId;
-        next();
+
     } catch (err) {
-        res.status(500).send({
+        throw ({
             status: 500,
             message: err.message
         })
@@ -76,7 +76,7 @@ const pullMessagesFromQueue = async () => {
         }).promise();
 
         if (Messages != null) {
-            deleteMessagesFromQueue(Messages)
+            await deleteMessagesFromQueue(Messages)
         }
         return Messages || [];
 
