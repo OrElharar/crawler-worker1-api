@@ -5,8 +5,8 @@ const sqs = new AWS.SQS({
     region: process.env.AWS_REGION
 })
 
-const QueueUrl = "https://sqs.eu-west-1.amazonaws.com/000447063003/crawler-queue";
 
+const QueueUrl = "https://sqs.eu-west-1.amazonaws.com/000447063003/crawler-queue";
 
 
 
@@ -31,6 +31,24 @@ const QueueUrl = "https://sqs.eu-west-1.amazonaws.com/000447063003/crawler-queue
 //     }
 // }
 
+const sendMessagesToQueue = async (Messages) => {
+    console.log("sendMessagesToQueue", Messages.length);
+    const sendMessagesPromises = Messages.map(message => {
+        return sqs.sendMessage({
+            QueueUrl,
+            // MessageGroupId: messageBody.crawlerId.toString(), ---FifoQueue
+            MessageBody: message
+        }).promise()
+    })
+    Promise.allSettled(sendMessagesPromises)
+        .then((data) => {
+            // console.log(data)
+        })
+        .catch((err) => {
+            // console.log({ err });
+        })
+}
+
 const sendMessageToQueue = async (messageBody) => {
     // const QueueUrl = req.body.queueUrl;
     const MessageBody = JSON.stringify(messageBody);
@@ -41,7 +59,6 @@ const sendMessageToQueue = async (messageBody) => {
             // MessageGroupId: messageBody.crawlerId.toString(), ---FifoQueue
             MessageBody
         }).promise();
-
     } catch (err) {
         throw ({
             status: 500,
@@ -58,8 +75,12 @@ const deleteMessagesFromQueue = (Messages) => {
         }).promise()
     })
     Promise.allSettled(deleteMessagesPromises)
-        .then((data) => { console.log(data) })
-        .catch((err) => { console.log({ err }); })
+        .then((data) => {
+            // console.log(data)
+        })
+        .catch((err) => {
+            // console.log({ err });
+        })
 }
 
 const pullMessagesFromQueue = async () => {
@@ -104,5 +125,6 @@ const deleteQueue = async (req, res, next) => {
 module.exports = {
     sendMessageToQueue,
     pullMessagesFromQueue,
-    deleteQueue
+    deleteQueue,
+    sendMessagesToQueue
 }

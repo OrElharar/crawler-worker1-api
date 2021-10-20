@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 app.use(workerRouter);
 
-app.listen(port, () => {
+app.listen(port, async () => {
     console.log("Server connected, port:", port);
-    startWorker()
+    await startWorker()
 });

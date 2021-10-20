@@ -14,26 +14,43 @@ const isLinkValid = (url) => {
     const urlRegex = /^(?:http(s)?:\/\/)?[\w.-]+(?:\.[\w\.-]+)+[\w\-\._~:/?#[\]@!\$&'\(\)\*\+,;=.]+$/
     return urlRegex.test(url)
 }
-const scrape = async (url) => {
+const scrape = async (url, parentId, depth, urlId) => {
     try {
         const urlResponse = await Axios.get(url);
         const $ = cheerio.load(urlResponse.data);
         const title = $("title").text();
         const links = [];
         $("a").each((i, el) => {
-            const link = getFullUrl($(el).attr("href"));
-            if (isLinkValid(link))
-                links.push(link);
+            const link = $(el).attr("href");
+            if (link != null) {
+                const fullLink = getFullUrl(link);
+                if (isLinkValid(fullLink))
+                    links.push(fullLink);
+            }
+
         })
-        // console.log({ title, url, links });
-        const page = { title, url, links };
+        const page = {
+            title,
+            url,
+            links,
+            parentId,
+            depth,
+            id: urlId
+
+        };
+
         return JSON.stringify(page)
     }
     catch (err) {
-        throw {
-            status: 500,
-            message: err.message
-        }
+        console.log("Error message:", { message: err.message, url })
+        return JSON.stringify({
+            title: "Url not found",
+            links: [],
+            url,
+            parentId,
+            depth,
+            id: urlId
+        })
     }
 }
 
