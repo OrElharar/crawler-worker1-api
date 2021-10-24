@@ -12,5 +12,8 @@ app.use(workerRouter);
 
 app.listen(port, async () => {
     console.log("Server connected, port:", port);
-    await startWorker()
+    startWorker()
+        .then(() => console.log("Worker starting..."))
+        .catch((err) => console.log({ err }))
+
 });

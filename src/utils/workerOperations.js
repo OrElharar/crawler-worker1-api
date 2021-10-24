@@ -4,20 +4,44 @@ const scrape = require("./scrape");
 const { pullMessagesFromQueue, sendMessagesToQueue } = require("./sqs");
 
 
+// const startWorker = async () => {
+//     while (true) {
+//         try {
+//             const Messages = await pullMessagesFromQueue()
+//             if (Messages.length !== 0) {
+//                 const messages = Messages.map((Message) => {
+//                     return JSON.parse(Message.Body)
+//                 })
+//                 await handleMessages(messages)
+//             }
+//         } catch (err) {
+//             console.log(err);
+//         }
+//     }
+// }
 const startWorker = async () => {
-    while (true) {
-        try {
-            const Messages = await pullMessagesFromQueue()
-            if (Messages.length !== 0) {
-                const messages = Messages.map((Message) => {
-                    return JSON.parse(Message.Body)
-                })
-                await handleMessages(messages)
-            }
-        } catch (err) {
-            console.log(err);
+
+    try {
+        const Messages = await pullMessagesFromQueue()
+        if (Messages.length !== 0) {
+            const messages = Messages.map((Message) => {
+                return JSON.parse(Message.Body)
+            })
+            await handleMessages(messages)
+            continueWork()
+
         }
+    } catch (err) {
+        console.log(err);
+        continueWork()
     }
+
+}
+
+const continueWork = () => {
+    startWorker()
+        .then()
+        .catch((err) => console.log({ err }))
 }
 
 const handleMessages = async (messages) => {
