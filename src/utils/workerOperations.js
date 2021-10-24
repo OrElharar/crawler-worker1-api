@@ -21,32 +21,42 @@ const startWorker = async () => {
 }
 
 const handleMessages = async (messages) => {
-    const crawlerId = messages[0].crawlerId;
-    const crawlerStatus = await getCrawlerById(crawlerId);
-    const depthLvl = parseInt(crawlerStatus.currentDepth);
-    messages.forEach(async (message) => {
-        const isCrawlerScannedUrl = await isCrawlerAlreadyScannedUrl(message.url, message.crawlerId);
-        if (!isCrawlerScannedUrl) {
-            const pageJson = await getPageByMessage(message)
-            const pageKey = getPageKey(message);
-            await redisClient.setAsync(pageKey, pageJson);
-            const pagesListKey = `${crawlerId}:${depthLvl}:${partialListKey}`;
-            await redisClient.rpush(pagesListKey, pageJson);
-            await incrementScannedUrls(crawlerId);
+    const handleMessagesPromises = messages.map((message) => handleNextMessage(message))
 
-        }
-        else {
-            await redisClient.hincrbyAsync(`crawler:${crawlerId}`, "currentDepthDeadEnds", 1);
-        }
-        await handleWorkerAfterScrapingChecks(crawlerId);
-
-    })
+    Promise.allSettled(handleMessagesPromises)
+        .then((data) => {
+            // console.log(data)
+        })
+        .catch((err) => {
+            // console.log({ err });
+        })
 
 }
 const getPageKey = (message) => {
     const pageKey = `${message.crawlerId}:${message.depthLvl}:${message.Id}:${urlObjPartialKey}`;
     return pageKey
 
+}
+
+const handleNextMessage = async (message) => {
+    const crawlerId = message.crawlerId;
+    const crawlerStatus = await getCrawlerById(crawlerId);
+    const depthLvl = parseInt(crawlerStatus.currentDepth);
+    const isCrawlerScannedUrl = await isCrawlerAlreadyScannedUrl(message.url, message.crawlerId);
+    if (!isCrawlerScannedUrl) {
+        const pageJson = await getPageByMessage(message)
+        const pageKey = `${crawlerId}:${depthLvl}:${message.id}:${urlObjPartialKey}`;
+        await redisClient.setAsync(pageKey, pageJson);
+        // const pagesListKey = `${crawlerId}:${depthLvl}:${partialListKey}`;
+        // await redisClient.rpush(pagesListKey, pageJson);
+
+        await incrementScannedUrls(crawlerId);
+
+    }
+    else {
+        await redisClient.hincrbyAsync(`crawler:${crawlerId}`, "currentDepthDeadEnds", 1);
+    }
+    await handleWorkerAfterScrapingChecks(crawlerId);
 }
 
 const getPageByMessage = async (message) => {
@@ -89,7 +99,7 @@ const handleWorkerAfterScrapingChecks = async (crawlerId) => {
     const updatedCrawlerStatus = await getCrawlerById(crawlerId);
     const isCurrentDepthScanDone = isCurrentDepthScanFinished(updatedCrawlerStatus)
     if (isCurrentDepthScanDone) {
-        await handlePreperationsForNextLvl(updatedCrawlerStatus)
+        await handlePreperationsForNextLvlImproved(updatedCrawlerStatus)
     }
 }
 
@@ -110,6 +120,7 @@ const isCurrentDepthScanFinished = (crawler) => {
     return (crawler.currentDepthTotalNumberOfUrls === crawler.currentDepthScannedUrls ||
         parseInt(crawler.currentDepthDeadEnds) + parseInt(crawler.currentDepthScannedUrls) === parseInt(crawler.currentDepthTotalNumberOfUrls))
 }
+
 
 
 const handlePreperationsForNextLvl = async (crawler) => {
@@ -134,28 +145,80 @@ const handlePreperationsForNextLvl = async (crawler) => {
 }
 
 
+const handlePreperationsForNextLvlImproved = async (crawler) => {
+    const crawlerId = crawler.id;
+    const firstId = parseInt(crawler.currentDepthFirstUrlId);
+    const currentDepthTotalNumberOfUrls = parseInt(crawler.currentDepthTotalNumberOfUrls);
+    const lastId = firstId + currentDepthTotalNumberOfUrls - 1;
+    const currentDepth = parseInt(crawler.currentDepth);
+    const nextDepth = currentDepth + 1;
+    const pagesListKey = `${crawlerId}:${currentDepth}:${partialListKey}`;
+
+    for (let i = firstId; i <= lastId; i++) {
+        const pageJson = await redisClient.getAsync(`${crawlerId}:${currentDepth}:${i}:${urlObjPartialKey}`);
+        if (pageJson != null)
+            await redisClient.rpush(pagesListKey, pageJson);
+    }
+    const pagesListJson = await redisClient.lrangeAsync(pagesListKey, 0, -1);
+    if (pagesListJson.length >= 1) {
+        const pagesList = pagesListJson.map((pageJson) => JSON.parse(pageJson));
+        sendUrlsChildrenToQueue(pagesList, lastId, nextDepth, crawler)
+
+    }
+    else {
+        const pagesList = [JSON.parse(pagesListJson)];
+        sendUrlsChildrenToQueue(pagesList, lastId, nextDepth, crawler)
+    }
+}
+
+
+const sendUrlsChildrenToQueue = async (sortedPages, lastId, nextDepth, crawler) => {
+    const currentDepth = crawler.currentDepth
+    const crawlerId = crawler.id
+    const messagesToSend = [];
+    let nextDepthTotalNumberOfUrl = 0;
+    const remainedNumberOfPagesToScan = parseInt(crawler.maxNumberOfPages) - parseFloat(crawler.totalNumberOfScannedUrls);
+    for (let j = 0; j < sortedPages.length; j++) {
+        const page = sortedPages[j]
+        const links = page.links;
+        for (let i = 0; i < links.length && nextDepthTotalNumberOfUrl < remainedNumberOfPagesToScan; i++) {
+            nextDepthTotalNumberOfUrl++;
+            const link = links[i];
+            const linkId = lastId + nextDepthTotalNumberOfUrl;
+            const newPage = {
+                url: link,
+                crawlerId,
+                urlDepth: nextDepth,
+                id: linkId,
+                parentId: page.id
+            }
+            messagesToSend.push(JSON.stringify(newPage))
+        }
+
+
+    }
+    const isCrowlingDone = (isCrawlingFinished(crawler) || nextDepthTotalNumberOfUrl === 0)
+    if (!isCrowlingDone) {
+        await sendMessagesToQueue(messagesToSend);
+    }
+
+    await saveCurrentDepthTreeOnRedis(sortedPages, currentDepth, crawlerId, isCrowlingDone);
+    await updateAndSaveCrawler(crawler, nextDepthTotalNumberOfUrl);
+}
+
 const arrangeTreeByPages = async (allPages, lastId, nextDepth, crawler) => {
-    // console.log({ allPages });
     const sortedPages = mergeSort(allPages)
-    // allPages.sort((a, b) => {
-    //     if (a.parentId < b.parentId || (a.parentId === b.parentId && a.id < b.id)) {
-    //         return -1
-    //     }
-    //     if (a.parentId > b.parentId || (a.parentId === b.parentId && a.id > b.id)) {
-    //         return 1
-    //     }
-    //     return 0
-    // })
-    // const sortedPages = allPages;
+
     const crawlerId = crawler.id
     const currentDepth = crawler.currentDepth
     const messagesToSend = [];
     let nextDepthTotalNumberOfUrl = 0;
+    const remainedNumberOfPagesToScan = parseInt(crawler.maxNumberOfPages) - parseFloat(crawler.totalNumberOfScannedUrls);
 
     for (let j = 0; j < sortedPages.length; j++) {
         const page = sortedPages[j]
         const links = page.links;
-        for (let i = 0; i < links.length; i++) {
+        for (let i = 0; i < links.length && nextDepthTotalNumberOfUrl < remainedNumberOfPagesToScan; i++) {
             nextDepthTotalNumberOfUrl++;
             const link = links[i];
             const linkId = lastId + nextDepthTotalNumberOfUrl;
@@ -203,54 +266,17 @@ const merge = (arr1, arr2) => {
     return [...sortedArr, ...arr1, ...arr2]
 }
 
-const getCurrentDepthTree = (firstId, lastId, crawlerId, currentDepth, currentDepthTotalNumberOfUrls) => {
-    const currentDepthTreeKeys = [];
-    for (let i = firstId; i <= lastId; i++) {
-        const pagePartialKey = `${crawlerId}:${currentDepth}:${i}:${urlObjPartialKey}`;
-        currentDepthTreeKeys.push(pagePartialKey)
-    }
-    return currentDepthTreeKeys
-}
-
-const handleNextPage = async (pageJson, i, messagesToSend, currentDepthTree, lastId, nextDepth) => {
-    const page = JSON.parse(pageJson);
-    currentDepthTree.push({ parentId: page.parentId, id: i, page })
-    // console.log("currentDepthTree.push", { parentId: page.parentId });
-    // currentDepthTree.push({id: i, page })
-
-    const links = page.links;
-    // console.log({ links });
-    // console.log({ id: i, links });
-    for (let j = 0; j < links.length; j++) {
-        const linkId = lastId + j + 1;
-        const url = links[j];
-        const newPage = {
-            url,
-            crawlerId,
-            urlDepth: nextDepth,
-            id: linkId,
-            parentId: i
-        }
-        messagesToSend.push(JSON.stringify(newPage))
-        // await sendMessageToQueue(newPage)
-    }
-    return messagesToSend.length
-}
 
 const saveCurrentDepthTreeOnRedis = async (currentDepthTree, currentDepth, crawlerId, isCrowlingDone) => {
     const jsonCurrentDepthTree = JSON.stringify({ currentDepthTree, isCrowlingDone });
-    // console.log({ jsonCurrentDepthTree });
-    // console.log({ currentDepthTreeLength: currentDepthTree.length, isCrowlingDone });
     await redisClient.setAsync(`${crawlerId}:${currentDepth}:${treeLvlPartialKey}`, jsonCurrentDepthTree);
 }
 
 const updateAndSaveCrawler = async (crawler, nextDepthTotalNumberOfUrl) => {
-    // console.log("Crawler pre update:", crawler)
     crawler.currentDepth = parseInt(crawler.currentDepth) + 1;
     crawler.currentDepthFirstUrlId = parseInt(crawler.currentDepthTotalNumberOfUrls) + parseInt(crawler.currentDepthFirstUrlId)
     crawler.currentDepthTotalNumberOfUrls = nextDepthTotalNumberOfUrl;
     crawler.currentDepthScannedUrls = 0;
-    // console.log("Crawler post update:", crawler)
 
     try {
         await saveCrawler(crawler);

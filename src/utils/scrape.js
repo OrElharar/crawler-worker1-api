@@ -42,7 +42,7 @@ const scrape = async (url, parentId, depth, urlId) => {
         return JSON.stringify(page)
     }
     catch (err) {
-        console.log("Error message:", { message: err.message, url })
+        // console.log("Error message:", { message: err.message, url })
         return JSON.stringify({
             title: "Url not found",
             links: [],
