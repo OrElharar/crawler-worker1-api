@@ -44,11 +44,7 @@ const handleMessages = async (messages) => {
         })
 
 }
-// const getPageKey = (message) => {
-//     const pageKey = `${message.crawlerId}:${message.depthLvl}:${message.Id}:${urlObjPartialKey}`;
-//     return pageKey
 
-// }
 
 const handleNextMessage = async (message) => {
     const crawlerId = message.crawlerId;
