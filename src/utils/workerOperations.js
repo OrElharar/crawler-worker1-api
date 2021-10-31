@@ -3,22 +3,6 @@ const redisClient = require("../db/redis");
 const scrape = require("./scrape");
 const { pullMessagesFromQueue, sendMessagesToQueue } = require("./sqs");
 
-
-// const startWorker = async () => {
-//     while (true) {
-//         try {
-//             const Messages = await pullMessagesFromQueue()
-//             if (Messages.length !== 0) {
-//                 const messages = Messages.map((Message) => {
-//                     return JSON.parse(Message.Body)
-//                 })
-//                 await handleMessages(messages)
-//             }
-//         } catch (err) {
-//             console.log(err);
-//         }
-//     }
-// }
 const startWorker = async () => {
 
     try {
@@ -28,9 +12,13 @@ const startWorker = async () => {
                 return JSON.parse(Message.Body)
             })
             await handleMessages(messages)
+            console.log("Number of messages pulled - ", messages.length);
+
             continueWork()
 
         }
+        continueWork()
+
     } catch (err) {
         console.log(err);
         continueWork()
@@ -56,11 +44,11 @@ const handleMessages = async (messages) => {
         })
 
 }
-const getPageKey = (message) => {
-    const pageKey = `${message.crawlerId}:${message.depthLvl}:${message.Id}:${urlObjPartialKey}`;
-    return pageKey
+// const getPageKey = (message) => {
+//     const pageKey = `${message.crawlerId}:${message.depthLvl}:${message.Id}:${urlObjPartialKey}`;
+//     return pageKey
 
-}
+// }
 
 const handleNextMessage = async (message) => {
     const crawlerId = message.crawlerId;
@@ -71,9 +59,6 @@ const handleNextMessage = async (message) => {
         const pageJson = await getPageByMessage(message)
         const pageKey = `${crawlerId}:${depthLvl}:${message.id}:${urlObjPartialKey}`;
         await redisClient.setAsync(pageKey, pageJson);
-        // const pagesListKey = `${crawlerId}:${depthLvl}:${partialListKey}`;
-        // await redisClient.rpush(pagesListKey, pageJson);
-
         await incrementScannedUrls(crawlerId);
 
     }
@@ -123,7 +108,7 @@ const handleWorkerAfterScrapingChecks = async (crawlerId) => {
     const updatedCrawlerStatus = await getCrawlerById(crawlerId);
     const isCurrentDepthScanDone = isCurrentDepthScanFinished(updatedCrawlerStatus)
     if (isCurrentDepthScanDone) {
-        await handlePreperationsForNextLvlImproved(updatedCrawlerStatus)
+        await handlePreperationsForNextLvl(updatedCrawlerStatus)
     }
 }
 
@@ -148,28 +133,6 @@ const isCurrentDepthScanFinished = (crawler) => {
 
 
 const handlePreperationsForNextLvl = async (crawler) => {
-    crawlerId = crawler.id;
-    const firstId = parseInt(crawler.currentDepthFirstUrlId);
-    const currentDepthTotalNumberOfUrls = parseInt(crawler.currentDepthTotalNumberOfUrls);
-    const lastId = firstId + currentDepthTotalNumberOfUrls - 1;
-    const currentDepth = parseInt(crawler.currentDepth);
-    const nextDepth = currentDepth + 1;
-    const pagesListKey = `${crawlerId}:${currentDepth}:${partialListKey}`;
-    const pagesListJson = await redisClient.lrangeAsync(pagesListKey, 0, -1);
-    if (pagesListJson.length >= 1) {
-        const pagesList = pagesListJson.map((pageJson) => JSON.parse(pageJson));
-        arrangeTreeByPages(pagesList, lastId, nextDepth, crawler)
-
-    }
-    else {
-        const pagesList = [JSON.parse(pagesListJson)];
-        console.log({ pagesList });
-        arrangeTreeByPages(pagesList, lastId, nextDepth, crawler)
-    }
-}
-
-
-const handlePreperationsForNextLvlImproved = async (crawler) => {
     const crawlerId = crawler.id;
     const firstId = parseInt(crawler.currentDepthFirstUrlId);
     const currentDepthTotalNumberOfUrls = parseInt(crawler.currentDepthTotalNumberOfUrls);
